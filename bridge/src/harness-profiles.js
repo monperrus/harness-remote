@@ -126,6 +126,30 @@ export const HARNESS_PROFILES = {
       sessionDelete: true
     }
   },
+
+  agentknit: {
+    id: "agentknit",
+    label: "agentknit",
+    // agentknit (https://pypi.org/project/agentknit/) is a Python coding-agent framework for
+    // any OpenAI-compatible /chat/completions endpoint. agentknit/agentknit-acp.py speaks ACP
+    // JSON-RPC over stdio and maps sessions onto agentknit sessions; model selection maps onto
+    // agentknit "faces" (model+endpoint pairs). Requires python3 with agentknit installed.
+    command: "python3",
+    args: ["agentknit/agentknit-acp.py"],
+    permissionMode: "allow",
+    preserveListedTimestamps: true,
+    reloadOnHistoryRefresh: false,
+    modelVariantConfigIDs: [],
+    capabilities: {
+      ...COMMON_CAPABILITIES,
+      models: true,
+      todos: false,
+      commands: false,
+      actions: false,
+      sessionRename: false,
+      sessionDelete: false
+    }
+  },
   codex: {
     id: "codex",
     label: "Codex CLI",
