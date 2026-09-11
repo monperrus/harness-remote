@@ -136,6 +136,9 @@ class FaceSession:
                 os.environ[key_name.upper()] = key_file.read_text().strip()
                 schema["keyring_service"] = "login2"
                 schema["keyring_username"] = key_name
+        # Per-face schema overrides (e.g. Kimi K3 requires temperature=1).
+        for key, value in (self.face.get("schema_overrides") or {}).items():
+            schema[key] = value
         return schema
 
     def _init_agentknit_session(self):
@@ -150,6 +153,45 @@ class FaceSession:
             )
         finally:
             os.chdir(old_cwd)
+
+    def _create_client(self):
+        """Create the LLM client, applying per-face request adaptations.
+
+        ``client_overrides.temperature`` pins the sampling temperature for
+        providers that reject other values (Kimi K3's coding endpoint only
+        accepts temperature=1 while agentknit's loop sends 0) — the same
+        adaptation the agentknit-faces launchers apply locally.
+        """
+        client = agentknit.create_client(self.schema)
+        overrides = self.face.get("client_overrides") or {}
+        if "temperature" in overrides:
+            create = client.chat.completions.create
+            temperature = overrides["temperature"]
+
+            def create_with_temperature(*args, **kwargs):
+                kwargs["temperature"] = temperature
+                return create(*args, **kwargs)
+
+            client.chat.completions.create = create_with_temperature
+        # Capture provider error bodies so [error] chunks explain the 4xx
+        # (agentknit only surfaces the status line).
+        create_inner = client.chat.completions.create
+
+        def create_with_error_capture(*args, **kwargs):
+            _log(f"request model={kwargs.get('model')!r} stream={kwargs.get('stream')} face={self.face['id']}")
+            try:
+                return create_inner(*args, **kwargs)
+            except Exception as exc:
+                response = getattr(exc, "response", None)
+                if response is not None:
+                    try:
+                        self._last_error_body = response.text[:800]
+                    except Exception:
+                        pass
+                raise
+
+        client.chat.completions.create = create_with_error_capture
+        return client
 
     # -- streaming bridge -------------------------------------------------
 
@@ -197,11 +239,16 @@ class FaceSession:
                 elif event_type == "final_answer":
                     pass
                 elif event_type == "error":
+                    text = str(data.get("text", "unknown error"))
+                    body = getattr(self, "_last_error_body", "")
+                    self._last_error_body = ""
+                    detail = f"\n\n[error] {text}"
+                    if body:
+                        detail += f"\n{body}"
                     _notify(sid, {
                         "sessionUpdate": "agent_message_chunk",
                         "messageId": self._chunk_id("assistant"),
-                        "content": {"type": "text",
-                                    "text": f"\n\n[error] {data.get('text', 'unknown error')}"},
+                        "content": {"type": "text", "text": detail},
                     })
             except Exception:
                 _log("on_event error:\n" + traceback.format_exc())
@@ -221,14 +268,15 @@ class FaceSession:
             self.cancel_token = agentknit.CancelToken()
             self._first_chunk_ids = {}
             self._open_calls = []
+            self._last_error_body = ""
             self.session["on_event"] = self._make_on_event()
             self.session["_event_handlers"] = {}
-            client = agentknit.create_client(self.schema)
+            client = self._create_client()
             stop_reason = "end_turn"
             try:
                 result = agentknit.run_turn(
                     client,
-                    self.session["model"],
+                    self.face["model"],
                     self.session,
                     text,
                     cancel=self.cancel_token,
