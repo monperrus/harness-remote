@@ -23,6 +23,11 @@ export function normalizeCorsOrigin(value) {
 export function allowedOrigin(request, config) {
   const origin = request.headers.origin
   if (!origin || !config.corsOrigins?.length) return undefined
+  // Credentialed CORS forbids a literal "*" in the response, so a configured
+  // wildcard echoes the request origin instead: any origin is allowed, and
+  // the echo keeps Access-Control-Allow-Credentials working. The bridge is
+  // always behind its own Basic Auth, so this trades nothing away.
+  if (config.corsOrigins.some((candidate) => candidate.trim() === "*")) return origin
   const normalizedOrigin = normalizeCorsOrigin(origin)
   return config.corsOrigins.some((candidate) => normalizeCorsOrigin(candidate) === normalizedOrigin) ? origin : undefined
 }
