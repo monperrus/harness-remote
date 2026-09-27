@@ -127,15 +127,25 @@ class FaceSession:
         # stream, but without stream=True agentknit emits no content_delta
         # events and the ACP client would see nothing until the turn ends.
         schema.setdefault("provider_api_support", {}).setdefault("streaming", {})["supported"] = True
-        # Key source: a file ~/.config/agentknit/<name> (mode 600) beats the
-        # desktop keyring, which a headless server does not have.
+        # Key source: the desktop keyring (service "login2", username
+        # <name>) is tried first by agentknit itself once keyring_service/
+        # keyring_username are set. A file at ~/.config/agentknit/<name>
+        # (mode 600) is only a fallback for a headless server with no
+        # keyring daemon: it feeds the env var agentknit's keyring fallback
+        # reads when the keyring lookup itself fails or is unavailable.
+        # Setting these only inside `if key_file.is_file()` (as before) meant
+        # a normal desktop with a working keyring but no such file never got
+        # keyring_service/keyring_username at all, so agentknit fell through
+        # to its generic API_KEY/OPENROUTER_API_KEY default — silently
+        # sending the wrong provider's key to this endpoint instead of
+        # raising a clear "no key configured" error.
         key_name = self.face.get("key_name")
         if key_name:
+            schema["keyring_service"] = "login2"
+            schema["keyring_username"] = key_name
             key_file = Path.home() / ".config/agentknit" / key_name
             if key_file.is_file():
                 os.environ[key_name.upper()] = key_file.read_text().strip()
-                schema["keyring_service"] = "login2"
-                schema["keyring_username"] = key_name
         # Per-face schema overrides (e.g. Kimi K3 requires temperature=1).
         for key, value in (self.face.get("schema_overrides") or {}).items():
             schema[key] = value
