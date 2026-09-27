@@ -97,7 +97,10 @@ export function resolveLaunchPlan(args, detected = detectBackends()) {
   if (detected.length === 1) return { mode: "single", backend: explicit ?? detected[0], detected }
 
   if (explicit === "opencode") return { mode: "single", backend: explicit, detected }
-  if (explicit && !ACP_BACKENDS.includes(explicit)) {
+  // Only reject a *known* backend name (omp/pi/claude/codex/opencode) that isn't ACP-capable.
+  // A custom third-party ACP backend (e.g. agentknit) isn't in BACKEND_EXECUTABLES at all, so it
+  // can't be "detected" and must not be rejected here just because other real CLIs also are.
+  if (explicit && Object.hasOwn(BACKEND_EXECUTABLES, explicit) && !ACP_BACKENDS.includes(explicit)) {
     throw new Error(`Unsupported ACP backend '${explicit}' for machine-daemon startup.`)
   }
 
